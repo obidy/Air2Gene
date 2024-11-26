@@ -1,0 +1,109 @@
+
+
+import requests
+import json
+from IPython.display import Image
+
+# Step 1: Input from the user
+print("Welcome to the Air2Gene Analysis Tool!")
+region = input("Enter the coordinates for your region of interest (format: lon1, lat1, lon2, lat2): ")
+pollutant = input("Enter the pollutant you are interested in (e.g., NO2, CO2, PM2.5): ")
+start_date = input("Enter the start date (format: YYYY-MM-DD): ")
+end_date = input("Enter the end date (format: YYYY-MM-DD): ")
+
+# Parse the region input (latitude, longitude) to get bounding box coordinates
+bbox = [float(coord) for coord in region.split(',')]  # Convert the coordinates to floats
+
+# Step 2: Request Access Token from Sentinel Hub API
+client_id = '9a0be33e-e515-46af-a767-6356d5622cac'
+client_secret = 'pyJODX7Dgyq0SSYoWiSx4oZ3OJetzCpt'
+
+# Token URL and payload for getting the access token
+token_url = 'https://services.sentinel-hub.com/oauth/token'
+token_payload = {
+    'grant_type': 'client_credentials',
+    'client_id': client_id,
+    'client_secret': client_secret
+}
+
+# Request access token
+token_response = requests.post(token_url, data=token_payload)
+
+# Check if the token was retrieved successfully
+if token_response.status_code == 200:
+    access_token = token_response.json().get('access_token')
+    print("Access Token retrieved successfully.")
+else:
+    print("Error retrieving access token:", token_response.text)
+    raise SystemExit("Could not retrieve access token.")
+
+# Step 3: Use the Access Token to request satellite imagery
+process_url = 'https://services.sentinel-hub.com/api/v1/process'
+
+# Define headers with the access token
+headers = {
+    'Content-Type': 'application/json',
+    'Authorization': f'Bearer {access_token}'
+}
+
+# Step 4: Define the request payload for the selected pollutant and timeframe
+payload = {
+    "input": {
+        "bounds": {
+            "bbox": bbox,  # Bounding box coordinates from user input
+            "properties": {
+                "crs": "http://www.opengis.net/def/crs/EPSG/0/4326"
+            }
+        },
+        "data": [
+            {
+                "type": "S2L2A",
+                "dataFilter": {
+                    "timeRange": {
+                        "from": f"{start_date}T00:00:00Z",  # Start date
+                        "to": f"{end_date}T23:59:59Z"  # End date
+                    },
+                    "maxCloudCoverage": 1
+                }
+            }
+        ]
+    },
+    "output": {
+        "width": 512,
+        "height": 343,
+        "responses": [
+            {
+                "identifier": "default",
+                "format": {
+                    "type": "image/jpeg"
+                }
+            }
+        ]
+    },
+    "evalscript": """
+    //VERSION=3
+    function setup() {
+      return {
+        input: ["B02", "B03", "B04"],
+        output: { bands: 3 }
+      };
+    }
+    function evaluatePixel(sample) {
+      return [2.5 * sample.B04, 2.5 * sample.B03, 2.5 * sample.B02];
+    }
+    """
+}
+
+# Step 5: Send the API request
+response = requests.post(process_url, headers=headers, data=json.dumps(payload))
+
+# Step 6: Handle the response and save the image
+if response.status_code == 200:
+    with open('satellite_image.jpg', 'wb') as f:
+        f.write(response.content)
+    print("Image successfully saved as 'satellite_image.jpg'")
+else:
+    print("Error fetching image:", response.status_code, response.text)
+
+# Step 7: Display the image in Colab
+Image('satellite_image.jpg')
